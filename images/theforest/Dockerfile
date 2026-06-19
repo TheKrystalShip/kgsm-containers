@@ -9,8 +9,8 @@
 # Licensed under the GNU General Public License v3.0
 # https://www.gnu.org/licenses/gpl-3.0.en.html
 
-# Starter image based on SteamCMD
-FROM steamcmd/steamcmd:debian
+# Shared KGSM base (kgsm user, common toolchain, tini PID 1, presence shim)
+FROM kgsm-base
 
 LABEL org.opencontainers.image.source=https://github.com/TheKrystalShip/KGSM-Containers
 LABEL org.opencontainers.image.authors="cristian.moraru@live.com"
@@ -22,33 +22,13 @@ EXPOSE 8766/udp 8766/tcp 27015/udp 27015/tcp 27016/udp 27016/tcp
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Environment variables (persistent)
-ENV USER=kgsm \
-  HOME=/home/kgsm \
-  SERVER_HOME=/opt/theforest \
+ENV SERVER_HOME=/opt/theforest \
   MANAGEMENT_FILE=/opt/theforest/theforest.manage.sh
 
-# Create user and necessary directories
-RUN useradd -m -d ${HOME} ${USER} \
-  && mkdir -p ${SERVER_HOME}/{backups,install,logs,saves,temp} \
-  && chown -R ${USER}:${USER} ${SERVER_HOME} \
-  && mkdir -p /tmp/.X11-unix \
-  && chown -R root:root /tmp/.X11-unix \
-  && chmod 1777 /tmp/.X11-unix
-
-# Install dependencies and clean up
-RUN apt-get update \
-  && apt-get install \
-  -y \
-  --no-install-recommends \
-  --no-install-suggests \
-  locales \
-  xvfb \
-  wine64 \
-  && echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen \
-  && locale-gen \
-  && apt-get clean autoclean \
-  && apt-get autoremove -y \
-  && rm -rf /var/lib/apt/lists/*
+# Create the game directories owned by the kgsm user (the user itself comes
+# from kgsm-base).
+RUN mkdir -p ${SERVER_HOME}/{backups,install,logs,saves,temp} \
+  && chown -R ${USER}:${USER} ${SERVER_HOME}
 
 # Copy entrypoint with ownership and permissions
 COPY --chown=${USER}:${USER} --chmod=0755 ./theforest.manage.sh /opt/theforest/theforest.manage.sh
@@ -57,5 +37,6 @@ COPY --chown=${USER}:${USER} --chmod=0755 ./theforest.manage.sh /opt/theforest/t
 WORKDIR ${SERVER_HOME}
 USER ${USER}
 
-ENTRYPOINT ["/opt/theforest/theforest.manage.sh"]
-CMD ["--start"]
+# The base ENTRYPOINT (tini -> base entrypoint -> shim + launch) runs this CMD
+# verbatim — the exact command that was previously ENTRYPOINT + CMD.
+CMD ["/opt/theforest/theforest.manage.sh", "--start"]

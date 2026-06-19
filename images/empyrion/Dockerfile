@@ -9,8 +9,8 @@
 # Licensed under the GNU General Public License v3.0
 # https://www.gnu.org/licenses/gpl-3.0.en.html
 
-# Starter image based on SteamCMD
-FROM steamcmd/steamcmd:debian
+# Shared KGSM base (kgsm user, common toolchain, tini PID 1, presence shim)
+FROM kgsm-base
 
 LABEL org.opencontainers.image.source=https://github.com/TheKrystalShip/KGSM-Containers
 LABEL org.opencontainers.image.authors="cristian.moraru@live.com"
@@ -22,31 +22,22 @@ EXPOSE 30000/udp 30001/udp 30002/udp 30003/udp
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Environment variables (persistent)
-ENV USER=kgsm \
-  HOME=/home/kgsm \
-  SERVER_HOME=/opt/empyrion \
+ENV SERVER_HOME=/opt/empyrion \
   MANAGEMENT_FILE=/opt/empyrion/empyrion.manage.sh
 
-# Create user and necessary directories
-RUN useradd -m -d ${HOME} ${USER} \
-  && mkdir -p ${SERVER_HOME}/{backups,install,logs,saves,temp} \
-  && chown -R ${USER}:${USER} ${SERVER_HOME} \
-  && mkdir -p /tmp/.X11-unix \
-  && chown -R root:root /tmp/.X11-unix \
-  && chmod 1777 /tmp/.X11-unix
+# Create the game directories owned by the kgsm user (the user itself comes
+# from kgsm-base).
+RUN mkdir -p ${SERVER_HOME}/{backups,install,logs,saves,temp} \
+  && chown -R ${USER}:${USER} ${SERVER_HOME}
 
-# Install dependencies and clean up
+# Install game-specific dependencies and clean up (common toolchain is in
+# kgsm-base). Empyrion's management script uses inotify-tools for log following.
 RUN apt-get update \
   && apt-get install \
   -y \
   --no-install-recommends \
   --no-install-suggests \
   inotify-tools \
-  locales \
-  xvfb \
-  wine64 \
-  && echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen \
-  && locale-gen \
   && apt-get clean autoclean \
   && apt-get autoremove -y \
   && rm -rf /var/lib/apt/lists/*
@@ -58,5 +49,6 @@ COPY --chown=${USER}:${USER} --chmod=0755 ./empyrion.manage.sh /opt/empyrion/emp
 WORKDIR ${SERVER_HOME}
 USER ${USER}
 
-ENTRYPOINT ["/opt/empyrion/empyrion.manage.sh"]
-CMD ["--start"]
+# The base ENTRYPOINT (tini -> base entrypoint -> shim + launch) runs this CMD
+# verbatim — the exact command that was previously ENTRYPOINT + CMD.
+CMD ["/opt/empyrion/empyrion.manage.sh", "--start"]
