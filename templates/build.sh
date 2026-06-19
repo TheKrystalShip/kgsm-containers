@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Build the shared base first — this image derives `FROM kgsm-base:<version>`:
+#   (cd ../base && ./build.sh)
+
 local_image="<game-name>"
 
 # GitHub Container Registry path

@@ -9,8 +9,9 @@
 # Licensed under the GNU General Public License v3.0
 # https://www.gnu.org/licenses/gpl-3.0.en.html
 
-# Shared KGSM base (kgsm user, common toolchain, tini PID 1, presence shim)
-FROM kgsm-base
+# Shared KGSM base (kgsm user, common toolchain, tini PID 1, presence shim).
+# Pinned to a base version so a future kgsm-base rebuild can't silently change us.
+FROM kgsm-base:1.0
 
 LABEL org.opencontainers.image.source=https://github.com/TheKrystalShip/KGSM-Containers
 LABEL org.opencontainers.image.authors="cristian.moraru@live.com"
