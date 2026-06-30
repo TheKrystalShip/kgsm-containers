@@ -55,3 +55,10 @@ There are no unit tests; validation is a `docker build` plus a container smoke. 
 ## Known gaps
 
 - Per-game **runtime** smoke (boot a real server from each image) is owed — current validation is `docker build` + the shim container e2e, not a full game boot.
+
+## Version tracking
+
+- **Version source:** `version=` variable in `images/base/build.sh`; bump it when the base image changes, then update `FROM kgsm-base:<version>` in every game Dockerfile
+- Bump the version whenever you make a user-facing change (new feature, bug fix, behaviour change). Patch for fixes, minor for new features, major for breaking changes.
+- Update `CHANGELOG.md` under `## [Unreleased]` with a brief entry for every meaningful change.
+- A git tag matching the new version should be created on release: `git tag v<version>`.

@@ -9,7 +9,7 @@ local_image="kgsm-base"
 # Base image version — the single source of truth. Game Dockerfiles pin
 # `FROM kgsm-base:${version}`; bump both in lockstep when the base changes in a
 # way games should adopt.
-version="1.0"
+version="1.0.0"
 # GitHub Container Registry path
 ghcr_image="ghcr.io/thekrystalship/${local_image}"
 # Docker Hub path
