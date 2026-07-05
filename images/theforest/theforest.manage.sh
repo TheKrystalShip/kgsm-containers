@@ -15,6 +15,10 @@
 # === BEGIN CONFIG ===
 # Environment variables passed onto the container from the docker-compose file
 export steamcmd_additional_args="${STEAMCMD_ADDITIONAL_ARGS:-}"
+# Auto-update before start: injected by KGSM from the instance's
+# instance_auto_update_before_start flag via the compose `environment` block.
+# "true" => refresh the game to the latest version before every start.
+export instance_auto_update="${INSTANCE_AUTO_UPDATE:-false}"
 
 export instance_name="theforest"
 export instance_working_dir="/opt/$instance_name"
@@ -161,11 +165,43 @@ if [[ $# -eq 0 ]]; then
   exit 1
 fi
 
+# Append one NDJSON line to the host-visible lifecycle channel. Best-effort:
+# a write failure here must never take down the game server, and a
+# guard-failed write is silently skipped rather than emitted as bad data
+# (mirrors the presence shim's honesty rule). The watchdog's container
+# lifecycle ingester tails this file to drive UPnP + host-visible run-state.
+function _emit_lifecycle() {
+  local type="$1"
+  local events_dir="${KGSM_EVENTS_DIR:-/run/kgsm}"
+
+  [[ -z "$type" ]] && return 0
+
+  mkdir -p "$events_dir" 2>/dev/null || return 0
+
+  local ts
+  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null)" || return 0
+
+  printf '{"type":"%s","ts":"%s"}\n' "$type" "$ts" >>"$events_dir/lifecycle.ndjson" 2>/dev/null
+
+  return 0
+}
+
 # Start the server in the current terminal
 function _start() {
   __print_info "Starting $self in the current terminal"
 
-  # Check if the game server is installed
+  # Fresh lifecycle channel for this container start: unlink (not truncate)
+  # so a new inode is allocated, mirroring the presence shim's fresh-inode
+  # semantics so the watchdog's container ingester never re-reads a prior
+  # start's lines.
+  rm -f "${KGSM_EVENTS_DIR:-/run/kgsm}/lifecycle.ndjson" 2>/dev/null
+  : >"${KGSM_EVENTS_DIR:-/run/kgsm}/lifecycle.ndjson" 2>/dev/null || true
+
+  # Update-before-start (mirrors native KGSM instances):
+  #   - If the game isn't installed yet (empty launch dir), install it.
+  #   - Otherwise, when the instance is configured to auto-update before start
+  #     (INSTANCE_AUTO_UPDATE, injected from the KGSM instance's auto_update
+  #     flag), refresh to the latest version before launching.
   if [ -z "$(ls -A "$instance_launch_dir")" ]; then
     __print_warning "Game server is not installed, running update process first"
     if ! _update; then
@@ -173,6 +209,12 @@ function _start() {
       return 1
     fi
     __print_success "Game server installation complete, proceeding with startup"
+  elif [[ "$instance_auto_update" == "true" ]]; then
+    __print_info "Auto-update before start is enabled, checking for updates..."
+    if ! _update; then
+      __print_error "Auto-update failed, aborting start"
+      return 1
+    fi
   fi
 
   cd "$instance_launch_dir" || {
@@ -187,8 +229,34 @@ function _start() {
   export WINEDEBUG=-all
   export WINEDLLOVERRIDES="mscoree,mshtml="
 
+  # Signal container startup on the lifecycle channel immediately before the
+  # game process takes over this PID (after update-before-start).
+  # Command channel: containers always run via _start in the foreground (no
+  # --start-background path), so the in-container socket/stdin-FIFO used by
+  # native's _start_background is never created here. Wire an independent
+  # FIFO on the shared /run/kgsm mount so the host can write console input
+  # directly into the game's stdin. Fully guarded: any failure falls back to
+  # launching without the stdin redirect rather than ever hanging the boot.
+  local _command_fifo="${KGSM_EVENTS_DIR:-/run/kgsm}/command.fifo"
+  local _command_fifo_ready=0
+  if rm -f "$_command_fifo" 2>/dev/null && mkfifo "$_command_fifo" 2>/dev/null; then
+    # The keepalive writer MUST exist before the game opens the FIFO for
+    # reading below, or that open() blocks forever waiting for a writer
+    # (mirrors _start_background's socket keepalive idiom below).
+    tail -f /dev/null >"$_command_fifo" 2>/dev/null &
+    _command_fifo_ready=1
+  else
+    __print_warning "Failed to create command FIFO at $_command_fifo, continuing without console input"
+  fi
+
+  _emit_lifecycle instance_started
+
   # shellcheck disable=SC2086
-  exec /usr/lib/wine/wine64 $instance_executable_file $instance_executable_arguments
+  if [[ "$_command_fifo_ready" -eq 1 ]]; then
+    exec /usr/lib/wine/wine64 $instance_executable_file $instance_executable_arguments <"$_command_fifo"
+  else
+    exec /usr/lib/wine/wine64 $instance_executable_file $instance_executable_arguments
+  fi
 }
 
 # Start the server in the background
@@ -394,7 +462,10 @@ function _exit_print_logs() {
   fi
 }
 
-trap '_exit_print_logs' TERM EXIT INT
+trap '_exit_print_logs' EXIT
+# Signal container shutdown on the lifecycle channel. Best-effort; a
+# SIGKILL/crash skips this, same limitation as the presence shim.
+trap '_exit_print_logs; _emit_lifecycle instance_stopping' INT TERM
 
 function _print_logs() {
   local follow=${1:-}
@@ -707,6 +778,12 @@ function _save_version() {
   __print_info "Saving version ${version}..."
 
   echo "$version" >"$instance_version_file"
+
+  # Best-effort: also surface the version on the host-mounted events channel.
+  # $instance_version_file lives in the un-mounted working-dir root, so this
+  # is the only way the host can see the real installed version. Guarded —
+  # a write failure here must never fail the function.
+  { echo "$version" >"${KGSM_EVENTS_DIR:-/run/kgsm}/version"; } 2>/dev/null || true
 
   __print_success "Version saved"
   return 0

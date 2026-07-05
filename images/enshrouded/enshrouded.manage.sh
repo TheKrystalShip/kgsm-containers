@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# KGSM-Container management file for <game-name>
+# KGSM-Container management file for Enshrouded (enshrouded)
 #
 # Author: Cristian Moraru <cristian.moraru@live.com>
 # Version: 1.0
@@ -9,18 +9,15 @@
 # Licensed under the GNU General Public License v3.0
 # https://www.gnu.org/licenses/gpl-3.0.en.html
 
-# This file is an example.
-# Replace empty variables below with actual values and adjust as necessary.
-
 # === BEGIN CONFIG ===
-# Environment variables passed onto the container from the docker-compose file
+# Environment variables passed onto the container
 export steamcmd_additional_args="${STEAMCMD_ADDITIONAL_ARGS:-}"
 # Auto-update before start: injected by KGSM from the instance's
 # instance_auto_update_before_start flag via the compose `environment` block.
 # "true" => refresh the game to the latest version before every start.
 export instance_auto_update="${INSTANCE_AUTO_UPDATE:-false}"
 
-export instance_name=""
+export instance_name="enshrouded"
 export instance_working_dir="/opt/$instance_name"
 
 export instance_backups_dir="$instance_working_dir/backups"
@@ -29,15 +26,15 @@ export instance_logs_dir="$instance_working_dir/logs"
 export instance_saves_dir="$instance_working_dir/saves"
 export instance_temp_dir="$instance_working_dir/temp"
 
-export instance_launch_dir="$instance_install_dir/any/subdirectory/where/the/server/is/located"
+export instance_launch_dir="$instance_install_dir"
 
-export instance_steam_app_id=0
+export instance_steam_app_id=2278520
 export instance_is_steam_account_required=0
 
 export instance_platform="windows"
-export instance_executable_file="$instance_launch_dir/server.exe"
-export instance_executable_arguments="--start --nogui --no-splash"
-
+export instance_executable_file="$instance_launch_dir/enshrouded_server.exe"
+export instance_executable_arguments=""
+# shellcheck disable=SC2155
 export instance_logs_redirect="$instance_logs_dir/$instance_name-$(date +"%Y-%m-%dT%H:%M:%S").log"
 
 export instance_stop_command_timeout_seconds=30
@@ -51,6 +48,9 @@ export instance_compress_backups="false"
 export instance_version_file="$instance_working_dir/.$instance_name.version"
 export instance_pid_file="$instance_working_dir/.$instance_name.pid"
 export instance_socket_file="$instance_working_dir/.$instance_name.socket"
+
+export instance_enable_port_forwarding="false"
+export instance_upnp_ports=()
 # === END CONFIG ===
 
 self=$(basename "$0")
@@ -75,6 +75,8 @@ Options:
 
   --logs                    Print last 10 lines of the log
   --logs [-f, --follow]     Print live logs
+  --enable-upnp             Enable UPnP ports
+  --disable-upnp            Disable UPnP ports
 
   --download                Downloads the game server files
   --download [version]      Downloads the game server files for a specific version
@@ -165,6 +167,39 @@ if [[ $# -eq 0 ]]; then
   exit 1
 fi
 
+function _enable_upnp() {
+  local output
+
+  __print_info "Enabling UPnP..."
+
+  if ! output=$(upnpc -e "$instance_name" -r "${instance_upnp_ports[@]}" 2>&1); then
+    __print_error "Failed to enable UPnP ports"
+    __print_info "To stop these message, set 'enable_port_forwarding' to 0 in $0"
+    __print_error "${output}"
+  fi
+
+  __print_success "UPnP enabled"
+}
+
+function _disable_upnp() {
+  local output
+
+  __print_info "Disabling UPnP..."
+
+  if ! output=$(upnpc -f "${instance_upnp_ports[@]}" 2>&1); then
+    __print_error "Failed to disable UPnP ports"
+    __print_info "To stop these message, set 'instance_enable_port_forwarding' to 'false' in $0"
+    __print_error "${output}"
+  fi
+
+  __print_success "UPnP disabled"
+}
+
+# Make sure to disable UPnP if it was enabled
+# This is done to prevent leaving UPnP ports open
+# when the script is interrupted
+trap '[[ "${instance_enable_port_forwarding:-false}" == "true" ]] && _disable_upnp' INT TERM
+
 # Append one NDJSON line to the host-visible lifecycle channel. Best-effort:
 # a write failure here must never take down the game server, and a
 # guard-failed write is silently skipped rather than emitted as bad data
@@ -217,6 +252,10 @@ function _start() {
     fi
   fi
 
+  if [[ "$instance_enable_port_forwarding" == "true" ]]; then
+    _enable_upnp
+  fi
+
   cd "$instance_launch_dir" || {
     __print_error "Failed to move into $instance_launch_dir, exiting"
     return 1
@@ -226,9 +265,12 @@ function _start() {
   Xvfb :1 -screen 0 800x600x24 &
   export DISPLAY=:1
   export WINEDEBUG=-all
+  # Enshrouded needs mscoree disabled (.NET is provided via vcrun2022, baked
+  # into the wine prefix at image-build time — see the Dockerfile).
+  export WINEDLLOVERRIDES="mscoree=d"
 
   # Signal container startup on the lifecycle channel immediately before the
-  # game process takes over this PID (after update-before-start).
+  # game process takes over this PID (after update-before-start + UPnP).
   # Command channel: containers always run via _start in the foreground (no
   # --start-background path), so the in-container socket/stdin-FIFO used by
   # native's _start_background is never created here. Wire an independent
@@ -262,6 +304,10 @@ function _start() {
 # and redirect logs to a file
 function _start_background() {
   __print_info "Starting $self in the background"
+
+  if [[ "$instance_enable_port_forwarding" == "true" ]]; then
+    _enable_upnp
+  fi
 
   cd "$instance_launch_dir" || {
     __print_error "Failed to move into $instance_launch_dir, exiting"
@@ -375,6 +421,10 @@ function _stop_server() {
   [[ -p "$instance_socket_file" ]] && rm -f "$instance_socket_file"
   [[ -f "$TAIL_PID_FILE" ]] && rm -f "$TAIL_PID_FILE"
 
+  if [[ "$instance_enable_port_forwarding" == "true" ]]; then
+    _disable_upnp
+  fi
+
   __print_success "Instance '$instance_name' stopped"
 }
 
@@ -461,7 +511,10 @@ function _exit_print_logs() {
 }
 
 trap '_exit_print_logs' EXIT
-# Signal container shutdown on the lifecycle channel. Best-effort; a
+# Signal container shutdown on the lifecycle channel. This is the trap that
+# actually governs INT/TERM (bash keeps only the last `trap ... SIGNAL`
+# registration per signal — the upnp-disable trap above this one is
+# superseded for INT/TERM, same as before this change). Best-effort; a
 # SIGKILL/crash skips this, same limitation as the presence shim.
 trap '_exit_print_logs; _emit_lifecycle instance_stopping' INT TERM
 
@@ -1015,6 +1068,14 @@ while [[ $# -gt 0 ]]; do
     ;;
   --update)
     _update
+    exit $?
+    ;;
+  --enable-upnp)
+    _enable_upnp
+    exit $?
+    ;;
+  --disable-upnp)
+    _disable_upnp
     exit $?
     ;;
   *)

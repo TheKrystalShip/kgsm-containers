@@ -24,18 +24,16 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 # Environment variables (persistent)
 ENV SERVER_HOME=/opt/enshrouded \
-  MANAGEMENT_FILE=/opt/enshrouded/entrypoint.sh
+  MANAGEMENT_FILE=/opt/enshrouded/enshrouded.manage.sh
 
 # Create the game directories owned by the kgsm user (the user itself comes
 # from kgsm-base).
 RUN mkdir -p ${SERVER_HOME}/{backups,install,logs,saves,temp} \
   && chown -R ${USER}:${USER} ${SERVER_HOME}
 
-# Declare volumes
-VOLUME [${SERVER_HOME}]
-
 # Install game-specific dependencies and clean up (common toolchain is in
-# kgsm-base). Enshrouded needs the 32-bit wine stack + winetricks runtime.
+# kgsm-base). Enshrouded needs the 32-bit wine stack + winetricks runtime, and
+# inotify-tools for the manage script's `--logs --follow`.
 RUN apt-get update \
   && apt-get install \
   -y \
@@ -46,19 +44,36 @@ RUN apt-get update \
   wine32:i386 \
   winbind \
   winetricks \
+  inotify-tools \
   && apt-get clean autoclean \
   && apt-get autoremove -y \
   && rm -rf /var/lib/apt/lists/*
 
-# Copy entrypoint with ownership and permissions
-COPY --chown=${USER}:${USER} --chmod=0755 ./entrypoint.sh /opt/enshrouded/entrypoint.sh
+# Copy the management script (same contract as every other KGSM game image).
+COPY --chown=${USER}:${USER} --chmod=0755 ./enshrouded.manage.sh /opt/enshrouded/enshrouded.manage.sh
 
 # Set working directory and switch to non-root user
 WORKDIR ${SERVER_HOME}
 USER ${USER}
 
+# Bake the wine prefix at IMAGE-BUILD time instead of on every container start
+# (the old entrypoint.sh re-ran all of this on each boot). Initialise the
+# prefix, install the runtime bits Enshrouded needs (corefonts + vcrun2022 for
+# .NET), and pin the Windows version — all under a throwaway Xvfb. The prefix
+# lives in the kgsm user's HOME (baked into the image layer), so `_start` only
+# has to launch wine. Kept non-fatal to mirror the original behaviour; runtime
+# validation catches a bad prefix.
+RUN Xvfb :1 -screen 0 800x600x24 >/dev/null 2>&1 & \
+  export DISPLAY=:1 WINEDLLOVERRIDES="mscoree=d" WINEDEBUG=-all; \
+  sleep 3; \
+  wineboot --init /nogui; \
+  winetricks -q corefonts sound=disabled vcrun2022; \
+  wine winecfg -v win10; \
+  wineserver -w; \
+  rm -rf ${HOME}/.cache
+
 # The base ENTRYPOINT (tini -> base entrypoint -> shim + launch) runs this CMD
-# verbatim — the exact command that was previously ENTRYPOINT + CMD. The base's
-# tee wrapper lands the entrypoint's stdout into the game log the shim reads, so
-# enshrouded now has the same log coverage as the manage.sh-based games.
-CMD ["/opt/enshrouded/entrypoint.sh", "--start"]
+# verbatim. Enshrouded now uses the same management script as every other KGSM
+# game image (the standard start/stop/save/update/backup contract), replacing
+# the legacy bespoke entrypoint.sh.
+CMD ["/opt/enshrouded/enshrouded.manage.sh", "--start"]
