@@ -26,6 +26,11 @@ templates/                     # Dockerfile + build.sh + manage-script skeleton 
 cd images && ./build_all.sh          # everything (base first); --push to publish
 cd images/base && ./build.sh         # just the base
 ```
+**There is no `deploy/` here.** This repo ships container images, so it has no install prefix and no
+systemd unit, and the `deploy/setup.sh` + `deploy/deploy.sh` pair the runnable `kgsm-*` repos use
+does not apply — `build_all.sh --push` *is* the deploy. Building images needs whatever privilege
+your local docker socket requires; nothing else here escalates.
+
 There are no unit tests; validation is a `docker build` plus a container smoke. To exercise the shim: run a game (or the base) with `KGSM_PLAYER_{JOINED,LEFT}_REGEX_B64` set and `/run/kgsm` bind-mounted, feed the game log matching lines, and assert the host-side `events.ndjson`.
 
 ## Architecture invariants (do not break these)
