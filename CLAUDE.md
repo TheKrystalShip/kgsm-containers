@@ -31,14 +31,14 @@ systemd unit, and the `deploy/setup.sh` + `deploy/deploy.sh` pair the runnable `
 does not apply — `build_all.sh --push` *is* the deploy. Building images needs whatever privilege
 your local docker socket requires; nothing else here escalates.
 
-There are no unit tests; validation is a `docker build` plus a container smoke. To exercise the shim: run a game (or the base) with `KGSM_PLAYER_{JOINED,LEFT}_REGEX_B64` set and `/run/kgsm` bind-mounted, feed the game log matching lines, and assert the host-side `events.ndjson`.
+There are no unit tests; validation is a `docker build` plus the shim container smoke — it does not boot a real game server from each image. To exercise the shim: run a game (or the base) with `KGSM_PLAYER_{JOINED,LEFT}_REGEX_B64` set and `/run/kgsm` bind-mounted, feed the game log matching lines, and assert the host-side `events.ndjson`.
 
 ## Architecture invariants (do not break these)
 
 1. **Games pin the base version.** Every game Dockerfile uses `FROM kgsm-base:<version>` — **never** bare `FROM kgsm-base`. This stops a base rebuild from silently changing games.
 2. **Version is single-sourced + bumped in lockstep.** `version="…"` lives once in `images/base/build.sh`. To move games to a new base, change that **and** the `FROM kgsm-base:<v>` line in **every** game Dockerfile, together — never one without the other.
 3. **Common setup lives only in `kgsm-base`.** The `kgsm` user, `tini`, the Wine/xvfb/locales/steamcmd toolchain, `/tmp/.X11-unix`, `/run/kgsm`, and the shim are all in the base. Game Dockerfiles add **only** game-specific dependencies + the game's dirs/script.
-4. **Games set `CMD`, never `ENTRYPOINT`.** The base owns the ENTRYPOINT (`tini → entrypoint-base.sh`). A game's `CMD` is its launch command (the old `ENTRYPOINT`+`CMD`), which the base wrapper runs verbatim.
+4. **Games set `CMD`, never `ENTRYPOINT`.** The base owns the ENTRYPOINT (`tini → entrypoint-base.sh`). A game's `CMD` is its launch command, which the base wrapper runs verbatim.
 5. **The shim is additive.** It runs alongside the game and only *reads* the game log. Never reroute the game's stdout, and never touch the per-game `manage.sh` launch or its **stdin-FIFO stop/save** path.
 6. **Never fabricate presence.** No regex env → detection disabled, zero events. A match that captures neither id nor name is skipped, never emitted as `{null,null}`. (Mirrors the ecosystem honesty rule: measured or unknown, never invented.)
 
@@ -56,10 +56,6 @@ There are no unit tests; validation is a `docker build` plus a container smoke. 
 
 - Each game Dockerfile keeps an attribution header, `LABEL org.opencontainers.image.{source,authors}`, `EXPOSE`, game ENV (`SERVER_HOME`, `MANAGEMENT_FILE`), the dirs `RUN`, game-apt `RUN`, `COPY` the script, `WORKDIR`, `USER ${USER}`, `CMD`.
 - Bash scripts: keep `shellcheck`-clean. The shim depends only on tools present in the base (`bash`, `perl`, `tail`, `base64`) — no new apt deps for shim work.
-
-## Known gaps
-
-- Per-game **runtime** smoke (boot a real server from each image) is owed — current validation is `docker build` + the shim container e2e, not a full game boot.
 
 ## Version tracking
 
@@ -87,6 +83,12 @@ history; never duplicate it into docs or code.
   survive it: *"temporary shim for the rework"*, *"added to satisfy the new requirement"*,
   milestone/phase labels (*"per M2"*, *"the Phase 1 step"*). If a line's justification is the work
   that produced it rather than the system as it now stands, it goes.
+- **No volatile numbers.** Counts and versions that drift — how many projects/files/tests/
+  partials exist, a dependency's pinned version, a file's line count — never go in prose: they are
+  stale the moment anything changes, and nothing fails to remind anyone. Name the authoritative
+  source instead (the csproj, the directory, the barrel file). A number belongs in prose only when
+  it *is* the contract (a port, a timeout, a cap) or a measured fact that is itself the reason a
+  design exists.
 - **Edits are replacements, not appends.** When changing an existing feature, rewrite the affected
   doc/comment fresh as if writing it for the first time — never append a correction under the
   stale version, and never leave the stale version standing beside the new. The current revision
