@@ -7,7 +7,7 @@
 # Started by the base entrypoint *alongside* the per-game launch; it never
 # touches the game's stdout, launch path, or stdin-FIFO stop/save mechanism.
 #
-# Contract (player-presence-plan.md, schema B / env C):
+# Contract (canonical statement: CLAUDE.md §"Player-presence contract"):
 #   - Reads KGSM_PLAYER_JOINED_REGEX_B64 / KGSM_PLAYER_LEFT_REGEX_B64, each a
 #     base64-encoded regex with optional named groups (?<id>...) / (?<name>...).
 #     Empty/unset -> that detection is disabled (no events).

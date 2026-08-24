@@ -50,7 +50,7 @@ There are no unit tests; validation is a `docker build` plus a container smoke. 
   {"type":"player_joined"|"player_left","id":<str|null>,"name":<str|null>,"ts":"<ISO-8601-UTC>"}
   ```
 - **Why base64:** raw regexes carry `$ < > \ "` etc.; passing them through compose-YAML → shell → container mangles them. Encode at the source, decode in the shim.
-- **Cross-repo:** the host bind-mounts `/run/kgsm` to a per-instance dir; **`kgsm-watchdog`** tails `events.ndjson` and emits `instance-player-joined/-left` engine events (`system/system`). KGSM (bash) injects the bind-mount + env from the game's blueprint `container.compose`. Full design: `../tks/player-presence-plan.md`.
+- **Cross-repo:** the host bind-mounts `/run/kgsm` to a per-instance dir; **`kgsm-watchdog`** tails `events.ndjson` and emits `instance-player-joined/-left` engine events (`system/system`). KGSM (bash) injects the bind-mount + env from the game's blueprint `container.compose`. The engine-side event vocabulary is `kgsm/docs/events.md`.
 
 ## Conventions
 
