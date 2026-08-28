@@ -21,7 +21,7 @@ KGSM-Containers provides standardized Docker container images for game servers t
 
 All game images derive from a single shared base image, **`kgsm-base`**, which carries the common toolchain, a non-root user, an init process, and an additive player-presence detector. Each game image adds only its game-specific dependencies and launch command.
 
-## 🎲 Supported Games
+## Supported Games
 
 | Game | Image |
 |---|---|
@@ -35,7 +35,7 @@ All game images derive from a single shared base image, **`kgsm-base`**, which c
 > [!NOTE]
 > New game server images are added regularly. Contributions welcome — see [Adding a New Game Image](#-adding-a-new-game-image).
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -71,7 +71,7 @@ docker run -it \
 
 Player-presence detection stays **off** unless you provide its env (see [Player-Presence Detection](#-player-presence-detection)).
 
-## 📦 Image Architecture
+## Image Architecture
 
 Images are built in **two layers**: the shared `kgsm-base`, and one image per game `FROM kgsm-base:<version>`.
 
@@ -115,7 +115,7 @@ Each game image adds only what is specific to that game: extra dependencies, its
 └── <game>.manage.sh   # management / launch script (the image CMD)
 ```
 
-## 🔨 Building the Images
+## Building the Images
 
 ```sh
 cd images
@@ -154,7 +154,7 @@ The full recipe (`Dockerfile`, `entrypoint-base.sh`, `kgsm-presence-shim.sh`, `b
   docker save kgsm-base:1.0 -o kgsm-base-1.0.tar   # later: docker load -i kgsm-base-1.0.tar
   ```
 
-## 👥 Player-Presence Detection
+## Player-Presence Detection
 
 Every image ships an **additive** shim (`/opt/kgsm/kgsm-presence-shim.sh`) that tails the game's log and self-reports player **join**/**leave** events as NDJSON to `/run/kgsm/events.ndjson`. The host bind-mounts that directory; KGSM's watchdog reads the file and turns the lines into engine events.
 
@@ -178,7 +178,7 @@ A match that captures neither an id nor a name is skipped (never emitted as `{nu
 
 The shim is strictly additive — it never reroutes the game's stdout and never touches the management script or its stop/save path.
 
-## ➕ Adding a New Game Image
+## Adding a New Game Image
 
 Create `images/<game>/` with a `Dockerfile`, a `build.sh` (copy an existing game's), and your management/launch script. The Dockerfile follows this pattern:
 
@@ -211,10 +211,10 @@ CMD ["/opt/<game>/<game>.manage.sh", "--start"]
 
 Key rules: pin the base version, add **only** game-specific deps, and set **`CMD`** (not `ENTRYPOINT`). To enable presence detection, supply the two regex env vars (KGSM does this from the blueprint).
 
-## 🤝 Contributing
+## Contributing
 
 We welcome new game server images! See [CONTRIBUTING.md](CONTRIBUTING.md). Follow the [Adding a New Game Image](#-adding-a-new-game-image) pattern above, or start from the skeleton in `templates/`.
 
-## 📄 License
+## License
 
 This project is licensed under the [GNU General Public License v3.0](LICENSE).
